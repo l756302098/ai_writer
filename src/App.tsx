@@ -3,7 +3,12 @@ import { v4 as uuidv4 } from 'uuid';
 import { Editor } from './components/Editor';
 import { AIPanel } from './components/AIPanel';
 import { Settings } from './components/Settings';
+import { OutlinePanel } from './components/OutlinePanel';
+import { CharacterPanel } from './components/CharacterPanel';
+import { WorldviewPanel } from './components/WorldviewPanel';
 import { db, type Chapter } from './storage/database';
+
+type SidebarTab = 'outline' | 'worldview' | 'characters';
 
 function wordCount(html: string): number {
   return html.replace(/<[^>]*>/g, '').replace(/\s+/g, '').length;
@@ -22,6 +27,7 @@ export default function App() {
   const [selectedText, setSelectedText] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [search, setSearch] = useState('');
+  const [activeTab, setActiveTab] = useState<SidebarTab>('outline');
 
   const loadChapters = useCallback(async () => {
     const list = await db.getRecentChapters();
@@ -32,10 +38,10 @@ export default function App() {
     loadChapters();
   }, [loadChapters]);
 
-  const createChapter = async () => {
+  const createChapter = async (title?: string): Promise<Chapter> => {
     const chapter: Chapter = {
       id: uuidv4(),
-      title: '未命名章节',
+      title: title || '未命名章节',
       content: '',
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -43,7 +49,17 @@ export default function App() {
     };
     await db.chapters.add(chapter);
     await loadChapters();
-    setCurrent(chapter);
+    return chapter;
+  };
+
+  const handleSelectChapter = async (chapterId: string | null, title: string) => {
+    if (chapterId) {
+      const ch = chapters.find(c => c.id === chapterId);
+      if (ch) { setCurrent(ch); return; }
+    }
+    // 创建新章节并关联到此大纲节点
+    const newChapter = await createChapter(title);
+    setCurrent(newChapter);
   };
 
   const updateContent = async (html: string) => {
@@ -51,7 +67,6 @@ export default function App() {
     const wc = wordCount(html);
     const updated: Chapter = { ...current, content: html, wordCount: wc, updatedAt: Date.now() };
 
-    // 自动从内容首行提取标题
     if (current.title === '未命名章节') {
       const firstLine = html.replace(/<[^>]*>/g, '').trim().split('\n')[0].slice(0, 30);
       if (firstLine) updated.title = firstLine;
@@ -59,23 +74,14 @@ export default function App() {
 
     await db.chapters.update(current.id, updated);
     setCurrent(updated);
-    // 静默更新列表（不触发全量重新加载影响光标）
     setChapters(prev => prev.map(c => c.id === updated.id ? updated : c));
   };
 
   const updateTitle = async (title: string) => {
     if (!current) return;
-    const updated = { ...current, title, updatedAt: Date.now() };
-    await db.chapters.update(current.id, { title });
-    setCurrent(updated);
-    setChapters(prev => prev.map(c => c.id === updated.id ? updated : c));
-  };
-
-  const deleteChapter = async (id: string) => {
-    if (!confirm('确认删除这个章节？')) return;
-    await db.chapters.delete(id);
-    if (current?.id === id) setCurrent(null);
-    await loadChapters();
+    await db.chapters.update(current.id, { title, updatedAt: Date.now() });
+    setCurrent({ ...current, title, updatedAt: Date.now() });
+    setChapters(prev => prev.map(c => c.id === current.id ? { ...c, title } : c));
   };
 
   const insertText = (text: string) => {
@@ -84,58 +90,85 @@ export default function App() {
     updateContent(newContent);
   };
 
+  const replaceContent = (html: string) => {
+    if (!current) return;
+    updateContent(html);
+  };
+
   const filtered = search
     ? chapters.filter(c => c.title.includes(search) || c.content.includes(search))
     : chapters;
 
   return (
     <div className="flex h-screen bg-gray-100 font-sans">
-      {/* 侧边栏 */}
+      {/* 左侧导航栏 */}
       <aside className="w-72 bg-white border-r flex flex-col shrink-0">
-        <div className="p-3 border-b space-y-2">
-          <button
-            onClick={createChapter}
-            className="w-full bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600 text-sm font-medium"
-          >
-            + 新建章节
-          </button>
-          <input
-            type="text"
-            placeholder="搜索章节..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-full border rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-300"
-          />
-        </div>
-
-        <ul className="flex-1 overflow-y-auto">
-          {filtered.map(ch => (
-            <li
-              key={ch.id}
-              onClick={() => setCurrent(ch)}
-              className={`group flex items-start justify-between px-3 py-2.5 border-b cursor-pointer hover:bg-gray-50 ${
-                current?.id === ch.id ? 'bg-blue-50' : ''
+        {/* Tab switching */}
+        <div className="flex border-b bg-gray-50">
+          {([
+            ['outline', '大纲'],
+            ['worldview', '世界观'],
+            ['characters', '人物'],
+          ] as [SidebarTab, string][]).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key)}
+              className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
+                activeTab === key
+                  ? 'text-blue-600 border-b-2 border-blue-500 bg-white'
+                  : 'text-gray-500 hover:text-gray-700'
               }`}
             >
-              <div className="overflow-hidden">
-                <p className="text-sm font-medium truncate">{ch.title}</p>
-                <p className="text-xs text-gray-400 mt-0.5">{formatDate(ch.updatedAt)} · {ch.wordCount} 字</p>
-              </div>
-              <button
-                onClick={e => { e.stopPropagation(); deleteChapter(ch.id); }}
-                className="opacity-0 group-hover:opacity-100 ml-2 text-gray-300 hover:text-red-400 text-xs shrink-0 mt-0.5"
-                title="删除"
-              >
-                ✕
-              </button>
-            </li>
+              {label}
+            </button>
           ))}
-          {filtered.length === 0 && (
-            <li className="text-center text-gray-400 text-sm mt-8">暂无章节</li>
-          )}
-        </ul>
+        </div>
 
-        <div className="p-3 border-t">
+        {/* Tab content */}
+        <div className="flex-1 overflow-hidden">
+          {activeTab === 'outline' && (
+            <OutlinePanel
+              activeChapterId={current?.id || null}
+              onSelectChapter={handleSelectChapter}
+            />
+          )}
+          {activeTab === 'worldview' && (
+            <WorldviewPanel />
+          )}
+          {activeTab === 'characters' && (
+            <CharacterPanel chapterContent={current?.content || ''} />
+          )}
+        </div>
+
+        {/* Bottom bar */}
+        <div className="p-3 border-t space-y-2">
+          {/* Chapter quick nav (compact) */}
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="搜索章节..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="w-full border rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-300"
+            />
+            {search && (
+              <div className="absolute bottom-full left-0 right-0 mb-1 bg-white border rounded-lg shadow-lg max-h-40 overflow-y-auto">
+                {filtered.slice(0, 10).map(ch => (
+                  <button
+                    key={ch.id}
+                    onClick={() => { setCurrent(ch); setSearch(''); }}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 border-b last:border-0"
+                  >
+                    <span className="truncate block">{ch.title}</span>
+                    <span className="text-xs text-gray-400">{formatDate(ch.updatedAt)} · {ch.wordCount} 字</span>
+                  </button>
+                ))}
+                {filtered.length === 0 && (
+                  <p className="text-center text-gray-400 text-sm py-2">无匹配章节</p>
+                )}
+              </div>
+            )}
+          </div>
           <button
             onClick={() => setShowSettings(true)}
             className="w-full text-gray-500 py-1.5 rounded-lg hover:bg-gray-100 text-sm"
@@ -170,20 +203,21 @@ export default function App() {
         ) : (
           <div className="flex-1 flex items-center justify-center text-gray-400">
             <div className="text-center">
-              <p className="text-lg mb-2">选择或新建一个章节开始写作</p>
-              <button
-                onClick={createChapter}
-                className="text-blue-500 hover:underline text-sm"
-              >
-                新建章节
-              </button>
+              <p className="text-lg mb-2">从左侧大纲中选择一个章节开始写作</p>
+              <p className="text-sm text-gray-300">或按 Ctrl+J 呼出 AI 助手</p>
             </div>
           </div>
         )}
       </main>
 
-      {/* AI 面板 */}
-      <AIPanel selectedText={selectedText} onInsertText={insertText} />
+      {/* AI 面板 (modal) */}
+      <AIPanel
+        selectedText={selectedText}
+        chapterContent={current?.content || ''}
+        chapterTitle={current?.title || ''}
+        onInsertText={insertText}
+        onReplaceContent={replaceContent}
+      />
 
       {/* 设置面板 */}
       <Settings isOpen={showSettings} onClose={() => setShowSettings(false)} />

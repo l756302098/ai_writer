@@ -7,8 +7,8 @@ interface SettingsProps {
 }
 
 const DEEPSEEK_MODELS = [
-  { value: 'deepseek-chat', label: 'DeepSeek Chat (V3，通用对话)' },
-  { value: 'deepseek-reasoner', label: 'DeepSeek Reasoner (R1，深度推理)' },
+  { value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash (通用写作，响应快)' },
+  { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro (深度推理，复杂改写)' },
 ];
 
 const STYLE_OPTIONS: { value: WritingSettings['style']; label: string }[] = [
@@ -20,7 +20,7 @@ const STYLE_OPTIONS: { value: WritingSettings['style']; label: string }[] = [
 
 export function Settings({ isOpen, onClose }: SettingsProps) {
   const [apiKey, setApiKey] = useState('');
-  const [model, setModel] = useState('deepseek-chat');
+  const [model, setModel] = useState('deepseek-v4-flash');
   const [style, setStyle] = useState<WritingSettings['style']>('casual');
   const [saving, setSaving] = useState(false);
   const [showKey, setShowKey] = useState(false);
