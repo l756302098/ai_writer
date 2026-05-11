@@ -10,7 +10,7 @@
 - **富文本编辑器**：Tiptap
 - **样式**：TailwindCSS
 - **本地存储**：Dexie（IndexedDB 封装）
-- **AI 接入**：DeepSeek API（OpenAI 兼容端点，浏览器直连）
+- **AI 接入**：DeepSeek API
 
 ---
 
@@ -48,8 +48,8 @@ npm run build
 2. 在 **DeepSeek API Key** 输入框中填入你的 Key（格式：`sk-...`）
    - 前往 [DeepSeek 开放平台](https://platform.deepseek.com) 注册并获取 API Key
 3. 选择模型：
-   - `DeepSeek Chat (V3)`：通用写作对话，响应快
-   - `DeepSeek Reasoner (R1)`：深度推理，适合复杂改写任务
+   - `deepseek-v4-flash`：通用写作对话，响应快
+   - `deepseek-v4-pro`：深度推理，适合复杂改写任务
 4. 选择写作风格偏好（影响 AI 的回复风格）
 5. 点击 **保存**
 
