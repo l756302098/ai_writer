@@ -63,6 +63,21 @@ export interface WritingSettings {
   style: 'formal' | 'casual' | 'literary' | 'concise';
 }
 
+export interface ApiLogMessage {
+  role: string;
+  content: string;
+}
+
+export interface ApiLog {
+  id: string;
+  functionName: string;
+  model: string;
+  messages: ApiLogMessage[];
+  stream: boolean;
+  timestamp: number;
+  responseLength?: number;
+}
+
 export class WritingDatabase extends Dexie {
   chapters!: Table<Chapter, string>;
   outlineNodes!: Table<OutlineNode, string>;
@@ -71,6 +86,7 @@ export class WritingDatabase extends Dexie {
   worldview!: Table<Worldview, string>;
   locations!: Table<Location, string>;
   settings!: Table<WritingSettings, string>;
+  apiLogs!: Table<ApiLog, string>;
 
   constructor() {
     super('WritingStudioDB');
@@ -90,6 +106,17 @@ export class WritingDatabase extends Dexie {
       worldview: 'id',
       locations: 'id, name',
       settings: 'id',
+    });
+
+    this.version(3).stores({
+      chapters: 'id, title, updatedAt',
+      outlineNodes: 'id, parentId, order',
+      characters: 'id, name',
+      characterEvolutions: 'id, characterId, timestamp',
+      worldview: 'id',
+      locations: 'id, name',
+      settings: 'id',
+      apiLogs: 'id, functionName, timestamp',
     });
   }
 
@@ -135,6 +162,14 @@ export class WritingDatabase extends Dexie {
 
   async updateWorldview(content: string): Promise<void> {
     await this.worldview.put({ id: 'default', content, updatedAt: Date.now() });
+  }
+
+  async addApiLog(log: ApiLog): Promise<void> {
+    await this.apiLogs.add(log);
+  }
+
+  async getRecentApiLogs(limit = 50): Promise<ApiLog[]> {
+    return this.apiLogs.orderBy('timestamp').reverse().limit(limit).toArray();
   }
 
   async getCharacterEvolutions(characterId: string): Promise<CharacterEvolution[]> {

@@ -1,5 +1,23 @@
 import OpenAI from 'openai';
-import { db, type OutlineNode, type Character } from '../storage/database';
+import { db, type OutlineNode, type Character, type ApiLog } from '../storage/database';
+
+async function logApiCall(
+  functionName: string,
+  model: string,
+  messages: { role: string; content: string }[],
+  responseLength?: number,
+): Promise<void> {
+  const log: ApiLog = {
+    id: crypto.randomUUID(),
+    functionName,
+    model,
+    messages: messages.map(m => ({ role: m.role, content: m.content })),
+    stream: true,
+    timestamp: Date.now(),
+    responseLength,
+  };
+  await db.addApiLog(log);
+}
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -98,6 +116,12 @@ export async function streamChat(
       onDelta(delta);
     }
   }
+
+  logApiCall('streamChat', model, [
+    { role: 'system', content: systemPrompt },
+    ...history,
+  ], fullText.length);
+
   return fullText;
 }
 
@@ -147,13 +171,14 @@ export async function polishChapter(
 
   const systemPrompt = await buildSystemPrompt();
   const userPrompt = buildPolishPrompt(ctx);
+  const messages = [
+    { role: 'system' as const, content: systemPrompt },
+    { role: 'user' as const, content: userPrompt },
+  ];
 
   const stream = await client.chat.completions.create({
     model,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ],
+    messages,
     stream: true,
   });
 
@@ -165,6 +190,9 @@ export async function polishChapter(
       onDelta(delta);
     }
   }
+
+  logApiCall('polishChapter', model, messages, fullText.length);
+
   return fullText;
 }
 
@@ -201,12 +229,10 @@ export async function generateOutline(
     existingHint += '\n请返回完整大纲，新增的章节用 [新增] 标记，修改的用 [修改] 标记。';
   }
 
-  const stream = await client.chat.completions.create({
-    model,
-    messages: [
-      {
-        role: 'system',
-        content: `你是一个专业的故事大纲规划师。根据用户描述生成二级目录的故事大纲。请严格按以下JSON格式返回，不要加其他内容：
+  const outlineMessages = [
+    {
+      role: 'system' as const,
+      content: `你是一个专业的故事大纲规划师。根据用户描述生成二级目录的故事大纲。请严格按以下JSON格式返回，不要加其他内容：
 {
   "outline": [
     {
@@ -218,12 +244,16 @@ export async function generateOutline(
     }
   ]
 }`,
-      },
-      {
-        role: 'user',
-        content: `故事描述：${description}${existingHint}`,
-      },
-    ],
+    },
+    {
+      role: 'user' as const,
+      content: `故事描述：${description}${existingHint}`,
+    },
+  ];
+
+  const stream = await client.chat.completions.create({
+    model,
+    messages: outlineMessages,
     stream: true,
   });
 
@@ -235,6 +265,8 @@ export async function generateOutline(
       onDelta(delta);
     }
   }
+
+  logApiCall('generateOutline', model, outlineMessages, fullText.length);
 
   try {
     const jsonMatch = fullText.match(/\{[\s\S]*\}/);
@@ -261,12 +293,10 @@ export async function generateCharacter(
     dangerouslyAllowBrowser: true,
   });
 
-  const stream = await client.chat.completions.create({
-    model,
-    messages: [
-      {
-        role: 'system',
-        content: `你是一个专业的角色设定师。根据简短描述生成完整的人物设定。严格按JSON格式返回：
+  const characterMessages = [
+    {
+      role: 'system' as const,
+      content: `你是一个专业的角色设定师。根据简短描述生成完整的人物设定。严格按JSON格式返回：
 {
   "name": "角色名",
   "role": "身份/职业",
@@ -276,9 +306,13 @@ export async function generateCharacter(
   "psychology": "初始心理状态",
   "motivation": "核心动机/目标"
 }`,
-      },
-      { role: 'user', content: brief },
-    ],
+    },
+    { role: 'user' as const, content: brief },
+  ];
+
+  const stream = await client.chat.completions.create({
+    model,
+    messages: characterMessages,
     stream: true,
   });
 
@@ -290,6 +324,8 @@ export async function generateCharacter(
       onDelta(delta);
     }
   }
+
+  logApiCall('generateCharacter', model, characterMessages, fullText.length);
 
   try {
     const jsonMatch = fullText.match(/\{[\s\S]*\}/);
@@ -311,15 +347,17 @@ export async function generateWorldview(
     dangerouslyAllowBrowser: true,
   });
 
+  const worldviewMessages = [
+    {
+      role: 'system' as const,
+      content: '你是一个世界观架构师。根据关键词生成结构化的故事世界观设定，包括时代背景、地理环境、社会制度、科技/魔法体系等。用中文，分段清晰。',
+    },
+    { role: 'user' as const, content: keywords },
+  ];
+
   const stream = await client.chat.completions.create({
     model,
-    messages: [
-      {
-        role: 'system',
-        content: '你是一个世界观架构师。根据关键词生成结构化的故事世界观设定，包括时代背景、地理环境、社会制度、科技/魔法体系等。用中文，分段清晰。',
-      },
-      { role: 'user', content: keywords },
-    ],
+    messages: worldviewMessages,
     stream: true,
   });
 
@@ -331,6 +369,9 @@ export async function generateWorldview(
       onDelta(delta);
     }
   }
+
+  logApiCall('generateWorldview', model, worldviewMessages, fullText.length);
+
   return fullText;
 }
 
@@ -350,29 +391,31 @@ export async function updateCharacterPsychology(
 
   const passages = relatedPassages.join('\n---\n');
 
-  const stream = await client.chat.completions.create({
-    model,
-    messages: [
-      {
-        role: 'system',
-        content: `你是一个角色发展分析师。根据故事段落，分析角色性格和心理状态的变化。返回JSON：
+  const characterEvoMessages = [
+    {
+      role: 'system' as const,
+      content: `你是一个角色发展分析师。根据故事段落，分析角色性格和心理状态的变化。返回JSON：
 {
   "personality": "更新后的性格描述",
   "psychology": "当前心理状态",
   "traits": ["标签"],
   "changes": "简短说明变化原因（如：经历了XX事件后...）"
 }`,
-      },
-      {
-        role: 'user',
-        content: `角色：${character.name}（${character.role}）
+    },
+    {
+      role: 'user' as const,
+      content: `角色：${character.name}（${character.role}）
 当前性格：${character.personality}
 当前心理：${character.psychology}
 
 相关段落：
 ${passages}`,
-      },
-    ],
+    },
+  ];
+
+  const stream = await client.chat.completions.create({
+    model,
+    messages: characterEvoMessages,
     stream: true,
   });
 
@@ -384,6 +427,8 @@ ${passages}`,
       onDelta(delta);
     }
   }
+
+  logApiCall('updateCharacterPsychology', model, characterEvoMessages, fullText.length);
 
   try {
     const jsonMatch = fullText.match(/\{[\s\S]*\}/);
